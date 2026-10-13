@@ -1,0 +1,220 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Attendance System</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f1f5f9;
+            margin: 0;
+            padding: 25px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: auto;
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px #0001;
+        }
+
+        h1 {
+            text-align: center;
+            color: #1d4ed8;
+        }
+
+        input, button {
+            padding: 11px;
+            margin: 5px 2px;
+            border-radius: 6px;
+            border: 1px solid #cbd5e1;
+            box-sizing: border-box;
+        }
+
+        input {
+            max-width: 100%;
+        }
+
+        button {
+            cursor: pointer;
+            color: white;
+            border: none;
+        }
+
+        .add { background: #2563eb; }
+        .present { background: #16a34a; }
+        .absent { background: #dc2626; }
+
+        .table-wrap {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 22px;
+        }
+
+        th, td {
+            padding: 12px;
+            border-bottom: 1px solid #ddd;
+            text-align: center;
+        }
+
+        th {
+            background: #dbeafe;
+        }
+
+        #message {
+            margin-top: 15px;
+            color: #166534;
+        }
+
+        @media (max-width: 600px) {
+            body { padding: 10px; }
+            .container { padding: 12px; }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Student Attendance System</h1>
+        <p>Register students and record their daily attendance.</p>
+
+        <h3>Add Student</h3>
+
+        <form id="studentForm">
+            <input id="name" placeholder="Student Name" required>
+            <input id="roll" placeholder="Roll Number" required>
+            <input id="email" type="email"
+                   placeholder="Parent Email (optional)">
+            <button class="add" type="submit">Add Student</button>
+        </form>
+
+        <p id="message" role="status"></p>
+
+        <h3>Student Attendance</h3>
+
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Roll No</th>
+                        <th>Name</th>
+                        <th>Parent Email</th>
+                        <th>Attendance</th>
+                    </tr>
+                </thead>
+                <tbody id="studentList"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById("studentForm");
+        const list = document.getElementById("studentList");
+        const message = document.getElementById("message");
+
+        async function request(url, options = {}) {
+            const response = await fetch(url, {
+                ...options,
+                headers: {
+                    "Content-Type": "application/json",
+                    ...(options.headers || {})
+                }
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.message || "Something went wrong");
+            }
+
+            return data;
+        }
+
+        async function loadStudents() {
+            try {
+                const students = await request("/api/students");
+                list.replaceChildren();
+
+                students.forEach(student => {
+                    const row = document.createElement("tr");
+
+                    [student.roll, student.name,
+                     student.parentEmail || "Not added"].forEach(value => {
+                        const cell = document.createElement("td");
+                        cell.textContent = value;
+                        row.appendChild(cell);
+                    });
+
+                    const attendanceCell = document.createElement("td");
+
+                    ["Present", "Absent"].forEach(status => {
+                        const button = document.createElement("button");
+                        button.textContent = status;
+                        button.className =
+                            status === "Present" ? "present" : "absent";
+
+                        button.addEventListener("click", async () => {
+                            try {
+                                message.textContent = "Saving attendance...";
+
+                                const result = await request("/api/attendance", {
+                                    method: "POST",
+                                    body: JSON.stringify({
+                                        studentId: student._id,
+                                        status: status
+                                    })
+                                });
+
+                                message.textContent = result.message;
+                            } catch (error) {
+                                message.textContent = error.message;
+                            }
+                        });
+
+                        attendanceCell.appendChild(button);
+                    });
+
+                    row.appendChild(attendanceCell);
+                    list.appendChild(row);
+                });
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        }
+
+        form.addEventListener("submit", async event => {
+            event.preventDefault();
+
+            try {
+                const student = {
+                    name: document.getElementById("name").value.trim(),
+                    roll: document.getElementById("roll").value.trim(),
+                    parentEmail: document.getElementById("email").value.trim()
+                };
+
+                await request("/api/students", {
+                    method: "POST",
+                    body: JSON.stringify(student)
+                });
+
+                form.reset();
+                message.textContent = "Student added successfully!";
+                await loadStudents();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        loadStudents();
+    </script>
+</body>
+</html>
