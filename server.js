@@ -1,24 +1,24 @@
 
 require("dotenv").config();
 
-const dns = require("dns");
-dns.setServers(["8.8.8.8", "8.8.4.4"]);
-
 const express = require("express");
 const mongoose = require("mongoose");
 const path = require("path");
 const nodemailer = require("nodemailer");
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 // 1. Middleware
 app.use(express.json());
 
-// 2. MongoDB connection from .env
+// 2. Serve static files from the project folder
+app.use(express.static(__dirname));
+
+// 3. MongoDB connection
 const MONGO_URI = process.env.MONGO_URI;
 
-// 3. Student schema
+// 4. Student schema
 const studentSchema = new mongoose.Schema({
     name: { type: String, required: true, trim: true },
     roll: { type: String, required: true, unique: true, trim: true },
@@ -36,7 +36,7 @@ const studentSchema = new mongoose.Schema({
 
 const Student = mongoose.model("Student", studentSchema);
 
-// 4. Gmail transporter
+// 5. Gmail transporter
 function createTransporter() {
     if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
         return null;
@@ -51,12 +51,22 @@ function createTransporter() {
     });
 }
 
-// 5. Display website
+// 6. Display website
 app.get("/", (req, res) => {
     res.sendFile(path.join(__dirname, "index.html"));
 });
 
-// 6. Get all students
+// 7. Health check
+app.get("/health", (req, res) => {
+    res.json({
+        status: "ok",
+        database: mongoose.connection.readyState === 1
+            ? "connected"
+            : "disconnected"
+    });
+});
+
+// 8. Get all students
 app.get("/api/students", async (req, res) => {
     try {
         const students = await Student.find().sort({ roll: 1 });
@@ -69,7 +79,7 @@ app.get("/api/students", async (req, res) => {
     }
 });
 
-// 7. Add student
+// 9. Add student
 app.post("/api/students", async (req, res) => {
     try {
         const { name, roll, parentEmail } = req.body;
@@ -107,12 +117,12 @@ app.post("/api/students", async (req, res) => {
 
         console.error("Add student error:", err.message);
         res.status(500).json({
-            message: "Could not add student."
+            message: "Could not add students."
         });
     }
 });
 
-// 8. Mark attendance and email if absent
+// 10. Mark attendance and email if absent
 app.post("/api/attendance", async (req, res) => {
     try {
         const { studentId, status } = req.body;
@@ -137,11 +147,13 @@ app.post("/api/attendance", async (req, res) => {
             });
         }
 
-        const today = new Date().toLocaleDateString("en-CA", {
-            timeZone: "Asia/Kolkata"
-        });
+        const today = new Intl.DateTimeFormat("en-CA", {
+            timeZone: "Asia/Kolkata",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit"
+        }).format(new Date());
 
-        // Save or update today's attendance
         const record = student.attendance.find(
             item => item.date === today
         );
@@ -149,13 +161,9 @@ app.post("/api/attendance", async (req, res) => {
         if (record) {
             record.status = status;
         } else {
-            student.attendance.push({
-                date: today,
-                status
-            });
+            student.attendance.push({ date: today, status });
         }
 
-        // Save attendance before sending email
         await student.save();
 
         let notification = "Attendance saved successfully.";
@@ -163,7 +171,7 @@ app.post("/api/attendance", async (req, res) => {
         if (status === "Absent") {
             if (!student.parentEmail) {
                 notification =
-                    "Attendance saved, but no email address was entered.";
+                    "Attendance saved, but no parent email was entered.";
             } else {
                 const transporter = createTransporter();
 
@@ -177,12 +185,11 @@ app.post("/api/attendance", async (req, res) => {
                             to: student.parentEmail,
                             subject: "Student Absence Notification",
                             text:
-                                `Hello,\n\n` +
-                                `Student ${student.name} ` +
+                                `Hello,\n\nStudent ${student.name} ` +
                                 `(Roll Number: ${student.roll}) ` +
                                 `was marked absent on ${today}.\n\n` +
-                                `This is an attendance notification ` +
-                                `from the Student Attendance System.`
+                                "This is an attendance notification " +
+                                "from the Student Attendance System."
                         });
 
                         notification =
@@ -209,23 +216,26 @@ app.post("/api/attendance", async (req, res) => {
     }
 });
 
-// 9. Connect to MongoDB once and start server
-async function startServer() {
+// 11. Start listening on Render's assigned port
+app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server listening on port ${PORT}`);
+});
+
+// 12. Connect to MongoDB independently
+async function connectDatabase() {
     try {
         if (!MONGO_URI) {
-            throw new Error("MONGO_URI is missing from .env");
+            throw new Error("MONGO_URI is missing from environment variables");
         }
 
-        await mongoose.connect(MONGO_URI);
+        await mongoose.connect(MONGO_URI, {
+            serverSelectionTimeoutMS: 15000
+        });
 
         console.log("MongoDB connected successfully");
-
-        app.listen(PORT, () => {
-            console.log(`Open http://localhost:${PORT}`);
-        });
     } catch (err) {
         console.error("MongoDB connection failed:", err.message);
     }
 }
 
-startServer();
+connectDatabase();
